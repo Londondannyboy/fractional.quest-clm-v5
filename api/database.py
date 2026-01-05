@@ -64,7 +64,7 @@ async def search_jobs(
     import sys
 
     async with get_connection() as conn:
-        # Build query with optional filters
+        # Base query - always return fractional jobs
         query = """
             SELECT
                 id::text,
@@ -98,39 +98,57 @@ async def search_jobs(
             FROM jobs
             WHERE is_active = true
               AND is_fractional = true
-              AND (
-                  title ILIKE '%' || $1 || '%'
-                  OR normalized_title ILIKE '%' || $1 || '%'
-                  OR description_snippet ILIKE '%' || $1 || '%'
-                  OR company_name ILIKE '%' || $1 || '%'
-                  OR executive_title::text ILIKE '%' || $1 || '%'
-                  OR role_category::text ILIKE '%' || $1 || '%'
-              )
         """
-        params = [query_text]
-        param_idx = 2
+        params = []
+        param_idx = 1
+        has_filter = False
 
+        # If executive_title is provided, filter by it OR search in title
         if executive_title:
-            query += f" AND executive_title::text ILIKE ${param_idx}"
+            query += f" AND (executive_title::text ILIKE ${param_idx} OR title ILIKE ${param_idx})"
             params.append(f"%{executive_title}%")
             param_idx += 1
+            has_filter = True
 
+        # If location provided, filter by location
         if location:
             query += f" AND (city::text ILIKE ${param_idx} OR country ILIKE ${param_idx} OR location ILIKE ${param_idx})"
             params.append(f"%{location}%")
             param_idx += 1
+            has_filter = True
 
         if is_remote is not None:
             query += f" AND is_remote = ${param_idx}"
             params.append(is_remote)
             param_idx += 1
+            has_filter = True
+
+        # If no specific filters but query has keywords, do a broad text search
+        if not has_filter and query_text:
+            # Clean query text - remove common filler words
+            clean_words = [w for w in query_text.lower().split()
+                          if w not in ('show', 'me', 'find', 'get', 'what', 'are', 'the', 'jobs', 'roles', 'positions', 'available', 'have', 'you', 'do', 'any')]
+            if clean_words:
+                search_term = ' '.join(clean_words[:3])  # Use first 3 meaningful words
+                query += f""" AND (
+                    title ILIKE ${param_idx}
+                    OR normalized_title ILIKE ${param_idx}
+                    OR description_snippet ILIKE ${param_idx}
+                    OR company_name ILIKE ${param_idx}
+                    OR executive_title::text ILIKE ${param_idx}
+                )"""
+                params.append(f"%{search_term}%")
+                param_idx += 1
 
         query += f" ORDER BY posted_date DESC NULLS LAST LIMIT ${param_idx}"
         params.append(limit)
 
+        print(f"[FQ Search] Filters: exec_title={executive_title}, loc={location}, remote={is_remote}", file=sys.stderr)
+        print(f"[FQ Search] Query params: {params}", file=sys.stderr)
+
         results = await conn.fetch(query, *params)
 
-        print(f"[FQ Search] Query: '{query_text[:30]}...' -> {len(results)} jobs", file=sys.stderr)
+        print(f"[FQ Search] Found {len(results)} jobs", file=sys.stderr)
 
         return [dict(r) for r in results]
 
