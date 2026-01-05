@@ -130,76 +130,14 @@ You are now running in enrichment mode. Your job is to:
 Be thorough - this runs in the background after the initial response."""
 
 
-def create_fast_agent() -> Agent:
-    """
-    Create the fast-path agent for immediate responses.
+# Note: We use direct Google Gemini API calls in agent.py instead of Pydantic AI agents
+# This provides more control over the API format and faster response times
 
-    Uses Groq Llama 3.3 70B for fast, reliable structured output.
-    - 70B model has better instruction following for JSON schemas
-    - Native tool-use support in Groq API
-    - Target latency: <2 seconds total.
-    """
-    return Agent(
-        'groq:llama-3.3-70b-versatile',
-        deps_type=FQAgentDeps,
-        result_type=FastFQResponse,
-        system_prompt=FAST_SYSTEM_PROMPT,
-        # No tools - search is done before calling agent
-        retries=2,
-        model_settings={
-            'temperature': 0.7,
-            'max_tokens': 300,
-        },
-    )
+def get_fast_agent():
+    """Placeholder - we use direct Gemini API calls instead."""
+    return None
 
 
-def create_enriched_agent() -> Agent:
-    """
-    Create the enrichment agent for background context building.
-
-    Has full toolset for:
-    - Job search
-    - Market analysis
-    - Follow-up topic suggestions
-
-    Target latency: <5 seconds (runs after initial response).
-    """
-    from .tools import search_jobs_tool, get_market_stats, suggest_followup_topics
-
-    return Agent(
-        'groq:llama-3.1-8b-instant',
-        deps_type=FQAgentDeps,
-        result_type=EnrichedFQResponse,
-        system_prompt=ENRICHED_SYSTEM_PROMPT,
-        tools=[
-            search_jobs_tool,
-            get_market_stats,
-            suggest_followup_topics,
-        ],
-        retries=2,
-        model_settings={
-            'temperature': 0.7,
-            'max_tokens': 500,  # More room for detailed analysis
-        },
-    )
-
-
-# Lazy-loaded agent instances
-_fast_agent: Optional[Agent] = None
-_enriched_agent: Optional[Agent] = None
-
-
-def get_fast_agent() -> Agent:
-    """Get or create the fast agent singleton."""
-    global _fast_agent
-    # Always create fresh to pick up config changes
-    _fast_agent = create_fast_agent()
-    return _fast_agent
-
-
-def get_enriched_agent() -> Agent:
-    """Get or create the enriched agent singleton."""
-    global _enriched_agent
-    if _enriched_agent is None:
-        _enriched_agent = create_enriched_agent()
-    return _enriched_agent
+def get_enriched_agent():
+    """Placeholder - we use direct Gemini API calls instead."""
+    return None

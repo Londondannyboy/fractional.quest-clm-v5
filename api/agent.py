@@ -15,26 +15,25 @@ from .database import search_jobs, get_job_stats, get_recent_jobs
 from .agent_deps import FQAgentDeps
 from .agent_config import get_fast_agent, FQ_SYSTEM_PROMPT, SAFE_TOPIC_CLUSTERS
 
-# Groq API for LLM
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+# Google Gemini API for LLM
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
 # Persistent HTTP client
-_groq_client: Optional[httpx.AsyncClient] = None
+_gemini_client: Optional[httpx.AsyncClient] = None
 
 
-def get_groq_client() -> httpx.AsyncClient:
-    """Get or create persistent Groq HTTP client."""
-    global _groq_client
-    if _groq_client is None:
-        _groq_client = httpx.AsyncClient(
-            base_url="https://api.groq.com/openai/v1",
+def get_gemini_client() -> httpx.AsyncClient:
+    """Get or create persistent Gemini HTTP client."""
+    global _gemini_client
+    if _gemini_client is None:
+        _gemini_client = httpx.AsyncClient(
+            base_url="https://generativelanguage.googleapis.com/v1beta",
             headers={
-                "Authorization": f"Bearer {GROQ_API_KEY}",
                 "Content-Type": "application/json",
             },
             timeout=15.0,
         )
-    return _groq_client
+    return _gemini_client
 
 
 # =============================================================================
@@ -418,23 +417,29 @@ Respond naturally as a helpful career advisor. Keep it conversational and under 
 Mention 1-2 specific jobs that match their query.
 End with a follow-up question about their preferences (location, remote work, specific industry, etc.)."""
 
-        # Call Groq LLM
-        client = get_groq_client()
+        # Call Google Gemini LLM
+        client = get_gemini_client()
 
+        # Gemini uses a different API format
         llm_response = await client.post(
-            "/chat/completions",
+            f"/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}",
             json={
-                "model": "llama-3.1-8b-instant",
-                "max_tokens": 300,
-                "messages": [
-                    {"role": "system", "content": FQ_SYSTEM_PROMPT},
-                    {"role": "user", "content": prompt},
+                "contents": [
+                    {
+                        "parts": [
+                            {"text": f"{FQ_SYSTEM_PROMPT}\n\n{prompt}"}
+                        ]
+                    }
                 ],
+                "generationConfig": {
+                    "maxOutputTokens": 300,
+                    "temperature": 0.7,
+                }
             },
         )
         llm_response.raise_for_status()
         data = llm_response.json()
-        response_text = data["choices"][0]["message"]["content"]
+        response_text = data["candidates"][0]["content"]["parts"][0]["text"]
 
         return response_text.strip()
 
