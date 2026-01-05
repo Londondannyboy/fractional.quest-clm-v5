@@ -50,170 +50,109 @@ async def search_jobs(
 ) -> list[dict]:
     """
     Search fractional executive jobs with filters.
-
-    Args:
-        query_text: Search text for title/description
-        executive_title: Filter by exec title (CFO, CMO, etc.)
-        location: Filter by city or country
-        is_remote: Filter for remote jobs
-        limit: Maximum number of results
-
-    Returns:
-        List of matching jobs
+    Uses test_jobs table with clean mock data.
     """
     import sys
 
     async with get_connection() as conn:
-        # Base query - always return fractional jobs
+        # Use test_jobs table with simple schema
         query = """
             SELECT
                 id::text,
                 title,
-                normalized_title,
-                company_name,
+                title as normalized_title,
+                company as company_name,
                 location,
-                city::text,
-                country,
-                employment_type,
-                workplace_type,
-                is_remote,
-                executive_title::text,
-                role_category::text,
-                industry::text,
+                location as city,
+                'UK' as country,
+                'Fractional' as employment_type,
+                'Hybrid' as workplace_type,
+                false as is_remote,
+                role_type as executive_title,
+                role_type as role_category,
+                'Professional Services' as industry,
                 salary_min,
                 salary_max,
-                salary_currency,
-                estimated_hourly_rate_min,
-                estimated_hourly_rate_max,
-                hours_per_week,
-                description_snippet,
-                full_description,
-                appeal_summary,
-                key_deliverables,
-                skills_required,
-                requirements,
-                posted_date,
-                url,
-                slug
-            FROM jobs
-            WHERE is_active = true
-              AND is_fractional = true
+                'GBP' as salary_currency,
+                salary_min / 250 as estimated_hourly_rate_min,
+                salary_max / 250 as estimated_hourly_rate_max,
+                16 as hours_per_week,
+                description as description_snippet,
+                description as full_description,
+                description as appeal_summary,
+                NULL as key_deliverables,
+                NULL as skills_required,
+                NULL as requirements,
+                created_at as posted_date,
+                NULL as url,
+                NULL as slug
+            FROM test_jobs
+            WHERE 1=1
         """
         params = []
         param_idx = 1
-        has_filter = False
 
-        # If executive_title is provided, filter by it OR search in title
+        # Filter by executive_title (maps to role_type)
         if executive_title:
-            query += f" AND (executive_title::text ILIKE ${param_idx} OR title ILIKE ${param_idx})"
+            query += f" AND (role_type ILIKE ${param_idx} OR title ILIKE ${param_idx})"
             params.append(f"%{executive_title}%")
             param_idx += 1
-            has_filter = True
 
-        # If location provided, filter by location
+        # Filter by location
         if location:
-            query += f" AND (city::text ILIKE ${param_idx} OR country ILIKE ${param_idx} OR location ILIKE ${param_idx})"
+            query += f" AND location ILIKE ${param_idx}"
             params.append(f"%{location}%")
             param_idx += 1
-            has_filter = True
 
-        if is_remote is not None:
-            query += f" AND is_remote = ${param_idx}"
-            params.append(is_remote)
-            param_idx += 1
-            has_filter = True
-
-        # If no specific filters but query has keywords, do a broad text search
-        if not has_filter and query_text:
-            # Clean query text - remove common filler words
+        # Fallback text search
+        if not executive_title and not location and query_text:
             clean_words = [w for w in query_text.lower().split()
                           if w not in ('show', 'me', 'find', 'get', 'what', 'are', 'the', 'jobs', 'roles', 'positions', 'available', 'have', 'you', 'do', 'any')]
             if clean_words:
-                search_term = ' '.join(clean_words[:3])  # Use first 3 meaningful words
-                query += f""" AND (
-                    title ILIKE ${param_idx}
-                    OR normalized_title ILIKE ${param_idx}
-                    OR description_snippet ILIKE ${param_idx}
-                    OR company_name ILIKE ${param_idx}
-                    OR executive_title::text ILIKE ${param_idx}
-                )"""
+                search_term = ' '.join(clean_words[:3])
+                query += f" AND (title ILIKE ${param_idx} OR company ILIKE ${param_idx} OR role_type ILIKE ${param_idx})"
                 params.append(f"%{search_term}%")
                 param_idx += 1
 
-        query += f" ORDER BY posted_date DESC NULLS LAST LIMIT ${param_idx}"
+        query += f" ORDER BY created_at DESC LIMIT ${param_idx}"
         params.append(limit)
 
-        print(f"[FQ Search] Filters: exec_title={executive_title}, loc={location}, remote={is_remote}", file=sys.stderr)
-        print(f"[FQ Search] Query params: {params}", file=sys.stderr)
-
+        print(f"[FQ Search] test_jobs query: exec_title={executive_title}, loc={location}", file=sys.stderr)
         results = await conn.fetch(query, *params)
-
-        print(f"[FQ Search] Found {len(results)} jobs", file=sys.stderr)
+        print(f"[FQ Search] Found {len(results)} jobs in test_jobs", file=sys.stderr)
 
         return [dict(r) for r in results]
 
 
 async def get_job_stats() -> dict:
     """
-    Get statistics about available fractional jobs.
-
-    Returns:
-        Dictionary with job counts by category, location, etc.
+    Get statistics about available fractional jobs from test_jobs.
     """
     async with get_connection() as conn:
-        # Total active fractional jobs
-        total = await conn.fetchval("""
-            SELECT COUNT(*) FROM jobs
-            WHERE is_active = true AND is_fractional = true
-        """)
+        total = await conn.fetchval("SELECT COUNT(*) FROM test_jobs")
 
-        # By executive title
         by_title = await conn.fetch("""
-            SELECT executive_title::text as title, COUNT(*) as count
-            FROM jobs
-            WHERE is_active = true AND is_fractional = true
-            AND executive_title IS NOT NULL
-            GROUP BY executive_title
-            ORDER BY count DESC
+            SELECT role_type as title, COUNT(*) as count
+            FROM test_jobs GROUP BY role_type ORDER BY count DESC
         """)
 
-        # By role category
         by_category = await conn.fetch("""
-            SELECT role_category::text as category, COUNT(*) as count
-            FROM jobs
-            WHERE is_active = true AND is_fractional = true
-            AND role_category IS NOT NULL
-            GROUP BY role_category
-            ORDER BY count DESC
+            SELECT role_type as category, COUNT(*) as count
+            FROM test_jobs GROUP BY role_type ORDER BY count DESC
         """)
 
-        # By location (city)
         by_city = await conn.fetch("""
-            SELECT city::text as city, COUNT(*) as count
-            FROM jobs
-            WHERE is_active = true AND is_fractional = true
-            AND city IS NOT NULL
-            GROUP BY city
-            ORDER BY count DESC
-            LIMIT 10
+            SELECT location as city, COUNT(*) as count
+            FROM test_jobs GROUP BY location ORDER BY count DESC LIMIT 10
         """)
 
-        # Remote vs on-site
-        remote_count = await conn.fetchval("""
-            SELECT COUNT(*) FROM jobs
-            WHERE is_active = true AND is_fractional = true AND is_remote = true
-        """)
-
-        # Average salary ranges
         salary_stats = await conn.fetchrow("""
             SELECT
                 AVG(salary_min) as avg_min,
                 AVG(salary_max) as avg_max,
-                AVG(estimated_hourly_rate_min) as avg_hourly_min,
-                AVG(estimated_hourly_rate_max) as avg_hourly_max
-            FROM jobs
-            WHERE is_active = true AND is_fractional = true
-            AND (salary_min IS NOT NULL OR estimated_hourly_rate_min IS NOT NULL)
+                AVG(salary_min / 250) as avg_hourly_min,
+                AVG(salary_max / 250) as avg_hourly_max
+            FROM test_jobs WHERE salary_min IS NOT NULL
         """)
 
         return {
@@ -221,8 +160,8 @@ async def get_job_stats() -> dict:
             "by_executive_title": [{"title": r["title"], "count": r["count"]} for r in by_title],
             "by_role_category": [{"category": r["category"], "count": r["count"]} for r in by_category],
             "by_city": [{"city": r["city"], "count": r["count"]} for r in by_city],
-            "remote_jobs": remote_count,
-            "on_site_jobs": total - remote_count if total else 0,
+            "remote_jobs": 0,
+            "on_site_jobs": total,
             "avg_salary_min": float(salary_stats["avg_min"]) if salary_stats and salary_stats["avg_min"] else None,
             "avg_salary_max": float(salary_stats["avg_max"]) if salary_stats and salary_stats["avg_max"] else None,
             "avg_hourly_rate_min": float(salary_stats["avg_hourly_min"]) if salary_stats and salary_stats["avg_hourly_min"] else None,
@@ -300,49 +239,41 @@ async def get_recent_jobs(
     limit: int = 5,
 ) -> list[dict]:
     """
-    Get the most recently posted fractional jobs.
-
-    Args:
-        executive_title: Filter by exec title (CFO, CMO, etc.)
-        limit: Maximum number of results
-
-    Returns:
-        List of recent jobs with key details
+    Get the most recently posted fractional jobs from test_jobs.
     """
     async with get_connection() as conn:
         query = """
             SELECT
                 id::text,
                 title,
-                normalized_title,
-                company_name,
-                city::text,
-                country,
-                executive_title::text,
-                estimated_hourly_rate_min,
-                estimated_hourly_rate_max,
-                hours_per_week,
-                is_remote,
-                posted_date,
-                appeal_summary,
-                url,
-                slug
-            FROM jobs
-            WHERE is_active = true AND is_fractional = true
+                title as normalized_title,
+                company as company_name,
+                location as city,
+                'UK' as country,
+                role_type as executive_title,
+                salary_min / 250 as estimated_hourly_rate_min,
+                salary_max / 250 as estimated_hourly_rate_max,
+                16 as hours_per_week,
+                false as is_remote,
+                created_at as posted_date,
+                description as appeal_summary,
+                NULL as url,
+                NULL as slug
+            FROM test_jobs
+            WHERE 1=1
         """
         params = []
         param_idx = 1
 
         if executive_title:
-            query += f" AND executive_title::text ILIKE ${param_idx}"
+            query += f" AND (role_type ILIKE ${param_idx} OR title ILIKE ${param_idx})"
             params.append(f"%{executive_title}%")
             param_idx += 1
 
-        query += f" ORDER BY posted_date DESC NULLS LAST LIMIT ${param_idx}"
+        query += f" ORDER BY created_at DESC LIMIT ${param_idx}"
         params.append(limit)
 
         results = await conn.fetch(query, *params)
-
         return [dict(r) for r in results]
 
 
