@@ -351,7 +351,8 @@ def format_jobs_for_response(jobs: list[dict]) -> str:
 async def generate_response(
     user_message: str,
     session_id: Optional[str] = None,
-    user_name: Optional[str] = None
+    user_name: Optional[str] = None,
+    user_id: Optional[str] = None,
 ) -> str:
     """
     Generate a response to the user's message.
@@ -360,8 +361,10 @@ async def generate_response(
         user_message: The user's question
         session_id: Optional session ID for context
         user_name: Optional user's first name
+        user_id: Optional user ID for Zep context
     """
     import sys
+    from .zep_client import search_jobs_graph, get_user_context, format_zep_context
 
     try:
         # Normalize query
@@ -371,7 +374,7 @@ async def generate_response(
         print(f"[FQ Agent] Query: '{user_message}' -> Normalized: '{normalized_query}'", file=sys.stderr)
         print(f"[FQ Agent] Filters: {filters}", file=sys.stderr)
 
-        # Search for jobs
+        # Search for jobs in database
         results = await search_jobs(
             query_text=filters["search_text"],
             executive_title=filters["executive_title"],
@@ -380,7 +383,20 @@ async def generate_response(
             limit=5,
         )
 
-        print(f"[FQ Agent] Found {len(results)} jobs", file=sys.stderr)
+        print(f"[FQ Agent] Found {len(results)} jobs from database", file=sys.stderr)
+
+        # Enrich with Zep knowledge graph (parallel)
+        zep_context = ""
+        try:
+            graph_results = await search_jobs_graph(normalized_query, limit=5)
+            user_context = None
+            if user_id:
+                user_context = await get_user_context(user_id, normalized_query)
+            zep_context = format_zep_context(graph_results, user_context)
+            if zep_context:
+                print(f"[FQ Agent] Got Zep context: {len(zep_context)} chars", file=sys.stderr)
+        except Exception as e:
+            print(f"[FQ Agent] Zep enrichment failed (continuing): {e}", file=sys.stderr)
 
         if not results:
             # Get stats and suggest alternatives
@@ -406,13 +422,20 @@ async def generate_response(
         else:
             name_instruction = "\n\nYou don't know the user's name."
 
-        # Build prompt
+        # Build prompt with Zep context if available
+        zep_section = ""
+        if zep_context:
+            zep_section = f"""
+ADDITIONAL CONTEXT (from knowledge graph):
+{zep_context}
+"""
+
         prompt = f"""Question: "{user_message}"
 {name_instruction}
 
 AVAILABLE JOBS (use only this data):
 {source_content}
-
+{zep_section}
 Respond naturally as a helpful career advisor. Keep it conversational and under 150 words.
 Mention 1-2 specific jobs that match their query.
 End with a follow-up question about their preferences (location, remote work, specific industry, etc.)."""
